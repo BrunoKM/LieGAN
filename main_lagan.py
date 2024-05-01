@@ -5,6 +5,8 @@ import argparse
 from torch.utils.data import DataLoader
 from dataset import *
 from gan import LieGenerator, LieDiscriminator, LieDiscriminatorEmb
+from mnist_data import DataConfig, get_data
+import jax
 from train import train_lie_gan, train_lie_gan_incremental
 from baseline.sgan import Generator as SGAN_Generator
 
@@ -58,50 +60,83 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
 
     # Load data
-    if args.task == 'traj_pred':
-        dataset = NBodyDataset(
-            input_timesteps=args.input_timesteps,
-            output_timesteps=args.output_timesteps,
-            save_path=f'./data/hnn/{args.dataset_name}-orbits-dataset.pkl',
-            extra_features=args.dataset_config,
-        )
-        if args.dataset_config is None:
-            n_dim = 8
-        elif 'log' in args.dataset_config:
-            n_dim = 5
-        n_channel = args.n_channel
-        d_input_size = n_dim * (args.input_timesteps + args.output_timesteps)
-    elif args.task == 'traj_pred_3body':
-        dataset = NBodyDataset(
-            input_timesteps=args.input_timesteps,
-            output_timesteps=args.output_timesteps,
-            save_path=f'./data/hnn/{args.dataset_name}-orbits-dataset.pkl',
-            extra_features=args.dataset_config,
-            nbody=3,
-        )
-        if args.dataset_config is None:
-            n_dim = 12
+    if args.task != "rotmnist":
+        if args.task == 'traj_pred':
+            dataset = NBodyDataset(
+                input_timesteps=args.input_timesteps,
+                output_timesteps=args.output_timesteps,
+                save_path=f'./data/hnn/{args.dataset_name}-orbits-dataset.pkl',
+                extra_features=args.dataset_config,
+            )
+            if args.dataset_config is None:
+                n_dim = 8
+            elif 'log' in args.dataset_config:
+                n_dim = 5
+            n_channel = args.n_channel
+            d_input_size = n_dim * (args.input_timesteps + args.output_timesteps)
+        elif args.task == 'traj_pred_3body':
+            dataset = NBodyDataset(
+                input_timesteps=args.input_timesteps,
+                output_timesteps=args.output_timesteps,
+                save_path=f'./data/hnn/{args.dataset_name}-orbits-dataset.pkl',
+                extra_features=args.dataset_config,
+                nbody=3,
+            )
+            if args.dataset_config is None:
+                n_dim = 12
+            else:
+                raise NotImplementedError
+            n_channel = args.n_channel
+            d_input_size = n_dim * (args.input_timesteps + args.output_timesteps)
+        elif args.task == 'top_tagging':
+            dataset = TopTagging(n_component=args.n_component, noise=args.noise)
+            n_dim = 4
+            n_channel = args.n_channel
+            n_component = args.n_component
+            d_input_size = n_dim * n_component
+            n_class = 2
+            emb_size = 32
+        elif args.task == 'discrete_rotation_synthetic':
+            dataset = DiscreteRotation(N=args.dataset_size)
+            n_dim = 3
+            n_channel = 1
+            d_input_size = 4
         else:
             raise NotImplementedError
-        n_channel = args.n_channel
-        d_input_size = n_dim * (args.input_timesteps + args.output_timesteps)
-    elif args.task == 'top_tagging':
-        dataset = TopTagging(n_component=args.n_component, noise=args.noise)
-        n_dim = 4
-        n_channel = args.n_channel
-        n_component = args.n_component
-        d_input_size = n_dim * n_component
-        n_class = 2
-        emb_size = 32
-    elif args.task == 'discrete_rotation_synthetic':
-        dataset = DiscreteRotation(N=args.dataset_size)
-        n_dim = 3
-        n_channel = 1
-        d_input_size = 4
-    else:
-        raise NotImplementedError
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    else:
+        assert args.task == "rotmnist"
+        train_ds, val_ds, test_ds = get_data(
+            config=DataConfig(
+                angle=30,  # TODO: ADJUST OR MAKE INTO AN ARGUMENT
+                batch_size=args.batch_size,
+            ),
+            rng = jax.random.PRNGKey(args.seed),
+        )
+
+        # Note(bruno): images will be normalised to -1 to 1 range!! This might be different from what they used.
+        def preprocess_to_torch(data):
+            return torch.tensor(data["image"].numpy().squeeze(0), dtype=torch.float32), torch.tensor(data["label"].numpy().squeeze(0), dtype=torch.long)
+
+        class EpochIterable():
+            def __init__(self, ds, num_examples_per_epoch: int):
+                self.ds_iter = iter(ds)
+                self.num_examples_per_epoch = num_examples_per_epoch
+
+            def __iter__(self):
+                n = 0
+                while n < self.num_examples_per_epoch:
+                    example = next(self.ds_iter)
+                    yield preprocess_to_torch(example)
+                    n += example["image"].shape[1]
+
+        # Note(bruno): Necessary to wrap our infinite iterable (train_ds) into a finite iterable so 
+        # that we don't have to rewrite the training loop that relies on epochs.
+        dataloader = EpochIterable(
+            train_ds,
+            num_examples_per_epoch=50000,  # TODO: ADJUST, but should only affect the number of training steps
+        )
 
     # Initialize generator and discriminator
     if args.model in ['lie', 'lie_subgrp']:
