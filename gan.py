@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
+
 from utils import *
 
 
@@ -17,26 +16,46 @@ class LieGenerator(nn.Module):
         self.dummy_pos = None
         self.l0reg = False
         self.activated_channel = None  # default to all channel
-        if args.g_init == 'random':
+        if args.g_init == "random":
             self.Li = nn.Parameter(torch.randn(n_channel, n_dim, n_dim))
             nn.init.kaiming_normal_(self.Li)
-        elif args.g_init == 'zero':
+        elif args.g_init == "zero":
             self.Li = nn.Parameter(torch.zeros(n_channel, n_dim, n_dim))
-        elif args.g_init == '2*2_factorization':
-            if args.task in ['traj_pred', ]:
-                self.mask = torch.block_diag(torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2))
+        elif args.g_init == "2*2_factorization":
+            if args.task in [
+                "traj_pred",
+            ]:
+                self.mask = torch.block_diag(
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                )
                 self.Li = nn.Parameter(torch.randn(n_channel, n_dim, n_dim))
-            elif args.task in ['traj_pred_3body', ]:
-                self.mask = torch.block_diag(torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2))
+            elif args.task in [
+                "traj_pred_3body",
+            ]:
+                self.mask = torch.block_diag(
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                    torch.ones(2, 2),
+                )
                 self.Li = nn.Parameter(torch.randn(n_channel, n_dim, n_dim))
             else:
                 raise NotImplementedError
-        elif args.g_init == '4*4_factorization':  # for traj_pred, assuming no interference between q and p
-            if args.task in ['traj_pred', ]:
+        elif (
+            args.g_init == "4*4_factorization"
+        ):  # for traj_pred, assuming no interference between q and p
+            if args.task in [
+                "traj_pred",
+            ]:
                 self.mask = torch.block_diag(torch.ones(4, 4), torch.ones(4, 4))
                 p = torch.eye(8)
-                p[4:6,2:4] = p[2:4,4:6] = torch.eye(2)
-                p[2:4,2:4] = p[4:6,4:6] = 0
+                p[4:6, 2:4] = p[2:4, 4:6] = torch.eye(2)
+                p[2:4, 2:4] = p[4:6, 4:6] = 0
                 self.mask = p @ self.mask @ p
                 self.Li = nn.Parameter(torch.randn(n_channel, n_dim, n_dim))
                 # nn.init.kaiming_normal_(self.Li)
@@ -48,7 +67,7 @@ class LieGenerator(nn.Module):
         self.activated_channel = None
 
     def normalize_factor(self):
-        trace = torch.einsum('kdf,kdf->k', self.Li, self.Li)
+        trace = torch.einsum("kdf,kdf->k", self.Li, self.Li)
         factor = torch.sqrt(trace / self.Li.shape[1])
         return factor.unsqueeze(-1).unsqueeze(-1)
 
@@ -60,14 +79,24 @@ class LieGenerator(nn.Module):
         if not killing:
             ch = self.activated_channel
             if ch is None:
-                return torch.sum(torch.abs(torch.triu(torch.einsum('bij,cij->bc', Li, Li), diagonal=1)))
+                return torch.sum(
+                    torch.abs(
+                        torch.triu(torch.einsum("bij,cij->bc", Li, Li), diagonal=1)
+                    )
+                )
             else:
-                return torch.sum(torch.abs(torch.triu(torch.einsum('bij,cij->bc', Li, Li), diagonal=1))[:(ch+1), :(ch+1)])
+                return torch.sum(
+                    torch.abs(
+                        torch.triu(torch.einsum("bij,cij->bc", Li, Li), diagonal=1)
+                    )[: (ch + 1), : (ch + 1)]
+                )
         else:
-            trxy = torch.triu(torch.einsum('bij,cji->bc', Li, Li), diagonal=1)
-            trx = torch.einsum('kdd->k', Li)
-            trx_try = torch.triu(torch.einsum('b,c->bc', trx, trx), diagonal=1)
-            return torch.sum(torch.abs(trxy - 1 / self.n_dim * trx_try))  # sum of tr(XY)-tr(X)tr(Y)/n, i.e. B(X,Y)/2n
+            trxy = torch.triu(torch.einsum("bij,cji->bc", Li, Li), diagonal=1)
+            trx = torch.einsum("kdd->k", Li)
+            trx_try = torch.triu(torch.einsum("b,c->bc", trx, trx), diagonal=1)
+            return torch.sum(
+                torch.abs(trxy - 1 / self.n_dim * trx_try)
+            )  # sum of tr(XY)-tr(X)tr(Y)/n, i.e. B(X,Y)/2n
 
     def forward(self, x, y):  # random transformation on x
         # x: (batch_size, n_components, n_dim); y: (batch_size, n_components_y, n_dim)
@@ -78,36 +107,61 @@ class LieGenerator(nn.Module):
         batch_size = x.shape[0]
         z = self.sample_coefficient(batch_size, x.device)
         Li = self.normalize_L() if self.args.normalize_Li else self.Li
-        if self.args.g_init in ['2*2_factorization', '4*4_factorization', ]:
-            g_z = torch.matrix_exp(torch.einsum('bj,jkl->bkl', z, Li * self.mask.to(x.device)))
+        if self.args.g_init in [
+            "2*2_factorization",
+            "4*4_factorization",
+        ]:
+            g_z = torch.matrix_exp(
+                torch.einsum("bj,jkl->bkl", z, Li * self.mask.to(x.device))
+            )
         else:
-            g_z = torch.matrix_exp(torch.einsum('bj,jkl->bkl', z, Li))
+            g_z = torch.matrix_exp(torch.einsum("bj,jkl->bkl", z, Li))
         x_t = self.transform(g_z, x, self.args.x_type)
         y_t = self.transform(g_z, y, self.args.y_type)
         return x_t, y_t
 
     def sample_coefficient(self, batch_size, device):
-        if self.args.coef_dist == 'normal':
-            z = torch.randn(batch_size, self.n_channel, device=device) @ self.sigma + self.mu
-        elif self.args.coef_dist == 'uniform':
-            z = torch.rand(batch_size, self.n_channel, device=device) * 2 * self.uniform_max - self.uniform_max
-        elif self.args.coef_dist == 'uniform_int_grid':
-            z = torch.randint(-int(self.uniform_max), int(self.uniform_max), (batch_size, self.n_channel), device=device, dtype=torch.float32)
+        if self.args.coef_dist == "normal":
+            z = (
+                torch.randn(batch_size, self.n_channel, device=device) @ self.sigma
+                + self.mu
+            )
+        elif self.args.coef_dist == "uniform":
+            z = (
+                torch.rand(batch_size, self.n_channel, device=device)
+                * 2
+                * self.uniform_max
+                - self.uniform_max
+            )
+        elif self.args.coef_dist == "uniform_int_grid":
+            z = torch.randint(
+                -int(self.uniform_max),
+                int(self.uniform_max),
+                (batch_size, self.n_channel),
+                device=device,
+                dtype=torch.float32,
+            )
         ch = self.activated_channel
         if ch is not None:  # leaving only specified columns
             mask = torch.zeros_like(z, device=z.device)
             mask[:, ch] = 1
             z = z * mask
         return z
-    
+
     def transform(self, g_z, x, tp):
-        if tp == 'vector':
-            return affine_coord(torch.einsum('bjk,btk->btj', g_z, x), self.dummy_pos)
-        elif tp == 'scalar':
+        if tp == "vector":
+            return affine_coord(torch.einsum("bjk,btk->btj", g_z, x), self.dummy_pos)
+        elif tp == "image":
+            # TODO: Implement
+            pass
+        elif tp == "scalar":
             return x
 
     def getLi(self):
-        if self.args.g_init in ['2*2_factorization', '4*4_factorization', ]:
+        if self.args.g_init in [
+            "2*2_factorization",
+            "4*4_factorization",
+        ]:
             return self.Li * self.mask.to(self.Li.device)
         else:
             return self.Li
@@ -152,6 +206,58 @@ class LieDiscriminatorEmb(nn.Module):
     def forward(self, x, y):
         x, y = x.reshape(x.shape[0], -1), y.reshape(y.shape[0], -1)
         y = self.emb(y).squeeze(1)
+        xy = torch.cat((x, y), dim=1)
+        validity = self.model(xy)
+        return validity
+
+
+class LeNet5V1(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.feature = nn.Sequential(
+            # 1
+            nn.Conv2d(
+                in_channels=1, out_channels=6, kernel_size=5, stride=1, padding=2
+            ),  # 28*28->32*32-->28*28
+            nn.Tanh(),
+            nn.AvgPool2d(kernel_size=2, stride=2),  # 14*14
+            # 2
+            nn.Conv2d(in_channels=6, out_channels=16, kernel_size=5, stride=1),  # 10*10
+            nn.Tanh(),
+            nn.AvgPool2d(kernel_size=2, stride=2),  # 5*5
+            nn.Flatten(),
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(in_features=16 * 5 * 5, out_features=120),
+            nn.Tanh(),
+            nn.Linear(in_features=120, out_features=84),
+            nn.Tanh(),
+            nn.Linear(in_features=84, out_features=10),
+        )
+
+    def forward(self, x):
+        return self.feature(x)
+
+
+class LieDiscriminatorLeNetEmb(nn.Module):
+    def __init__(self):
+        super(LieDiscriminatorLeNetEmb, self).__init__()
+        self.emb_size = 400
+        self.model = nn.Sequential(
+            nn.Linear(self.emb_size + self.emb_size, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 1),
+            nn.Sigmoid(),
+        )
+        self.emb = LeNet5V1()
+
+    def forward(self, x, y):
+        # x, y = x.reshape(x.shape[0], -1), y.reshape(y.shape[0], -1)
+        y = self.emb(y).squeeze(1)
+        x = self.emb(x).squeeze(1)
+        print("test", x.shape, y.shape)
         xy = torch.cat((x, y), dim=1)
         validity = self.model(xy)
         return validity

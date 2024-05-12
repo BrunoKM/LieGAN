@@ -1,14 +1,25 @@
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
+
 # from chex import PRNGKey
 import tensorflow_datasets as tfds
-from clu import deterministic_data
-from clu import preprocess_spec
+from clu import deterministic_data, preprocess_spec
+from torch.utils.data import Dataset
 
-
-from dataclasses import dataclass
 from preprocess import all_ops
+
 # from augmented_dsprites import construct_augmented_dsprites
+
+
+class CombinedDataset(Dataset):
+    def __init__(self, ds1, ds2):
+        self.ds1 = ds1
+        self.ds2 = ds2
+
+    def __getitem__(self, idx):
+        return self.ds1[idx], self.ds2[idx]
 
 
 @dataclass
@@ -16,18 +27,24 @@ class DataConfig:
     angle: float
     batch_size: int
     dataset: str = "MNIST"
-    aug_dsprites: None = None  # TODO
+    aug_dsprites: None = None  # TODO
     train_split: str = "train[10000:60000]"
     val_split: str = "train[:10000]"
-    test_split: None = None  # TODO
+    test_split: None = None  # TODO
     shuffle_buffer_size: int = 50000
 
     @property
     def pp_train(self) -> str:
-        return f'value_range(-1, 1)|random_rotate(-{self.angle}, {self.angle}, fill_value=-1)|keep(["image", "label"])'
+        return f'value_range(-1, 1)|random_rotate(-{self.angle}, {self.angle}, fill_value=-1, key_result="rot")|keep(["image", "rot"])'
+
     @property
     def pp_eval(self) -> str:
         return f'value_range(-1, 1)|random_rotate(-{self.angle}, {self.angle}, fill_value=-1)|keep(["image", "label"])'
+
+    # @property
+    # def pp_unaugmented_train(self) -> str:
+    #     return 'value_range(-1, 1)|keep(["image"])'
+
     @property
     def num_val_examples(self) -> int:
         return int(self.val_split.split(":")[1].split("]")[0])
@@ -40,7 +57,7 @@ def get_data(
     train_rng, val_rng, test_rng = jax.random.split(rng, 3)
 
     if config.dataset == "aug_dsprites":
-        raise NotImplemented
+        raise NotImplementedError
         dataset = construct_augmented_dsprites(
             aug_dsprites_config=config.aug_dsprites,
             sampler_rng=train_rng,
@@ -71,7 +88,7 @@ def get_data(
     )
 
     if config.dataset == "aug_dsprites":
-        raise NotImplemented
+        raise NotImplementedError
         dataset = construct_augmented_dsprites(
             aug_dsprites_config=config.aug_dsprites,
             sampler_rng=val_rng,  # Use a different RNG key for validation.
@@ -125,5 +142,5 @@ def get_data(
         pad_up_to_batches=pad_up_to_batches,
         shuffle=False,
     )
-
-    return train_ds, val_ds, test_ds
+    print("returning 4 things?")
+    return train_ds, unaug_train_ds, val_ds, test_ds

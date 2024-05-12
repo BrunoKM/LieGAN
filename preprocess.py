@@ -1,12 +1,11 @@
-import math
 import dataclasses
-from typing import List, Optional, Tuple, Union
+import math
 from collections import abc
+from typing import List, Optional, Tuple, Union
 
-from clu import preprocess_spec
 import tensorflow as tf
 import tensorflow_addons as tfa
-
+from clu import preprocess_spec
 
 Features = preprocess_spec.Features
 
@@ -83,8 +82,11 @@ class RandomRotate:
         self.θ_max = self.θ_max * math.pi / 180
         θ = tf.random.stateless_uniform((), rng, self.θ_min, self.θ_max)  # type: ignore
 
-        image = tfa.image.rotate(image, θ, "bilinear", fill_mode=self.fill_mode, fill_value=self.fill_value)  # type: ignore
-        features[self.key_result or self.key] = image
+        features[self.key] = image
+        image = tfa.image.rotate(
+            image, θ, "bilinear", fill_mode=self.fill_mode, fill_value=self.fill_value
+        )  # type: ignore
+        features[self.key_result] = image
         return features
 
 
@@ -131,7 +133,13 @@ class RandomZoom:
 
         transforms = tf.stack([x_zoom, 0, x_offset, 0, y_zoom, y_offset, 0, 0], axis=0)
 
-        image = tfa.image.transform(image, transforms, "bilinear", fill_mode=self.fill_mode, fill_value=self.fill_value)  # type: ignore
+        image = tfa.image.transform(
+            image,
+            transforms,
+            "bilinear",
+            fill_mode=self.fill_mode,
+            fill_value=self.fill_value,
+        )  # type: ignore
         features[self.key_result or self.key] = image
         return features
 

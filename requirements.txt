@@ -1,4 +1,4 @@
--e git+ssh://git@github.com/JamesAllingham/CommonLoopUtils.git@834e3eca13e73445cf05f0be2188cb1d07d1eb3e#egg=clu&subdirectory=../../CommonLoopUtils
+# -e git+http://git@github.com/JamesAllingham/CommonLoopUtils.git@834e3eca13e73445cf05f0be2188cb1d07d1eb3e#egg=clu&subdirectory=../../CommonLoopUtils
 tensorflow==2.13
 tensorflow-datasets==4.9.4
 torch
